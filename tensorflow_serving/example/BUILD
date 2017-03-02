@@ -72,6 +72,19 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "mnist_rest_client",
+    srcs = [
+        "mnist_rest_client.py",
+    ],
+    deps = [
+        ":mnist_input_data",
+        "//tensorflow_serving/apis:predict_proto_py_pb2",
+        "//tensorflow_serving/apis:prediction_service_proto_py_pb2",
+        "@org_tensorflow//tensorflow:tensorflow_py",
+    ],
+)
+
 # TODO(b/32628014): remove inception_export after we no longer support
 # SessionBundle.
 py_binary(

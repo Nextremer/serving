@@ -25,7 +25,8 @@ import os
 import numpy
 from six.moves import urllib
 
-SOURCE_URL = 'http://yann.lecun.com/exdb/mnist/'
+#SOURCE_URL = 'http://yann.lecun.com/exdb/mnist/'
+SOURCE_URL = 'https://github.com/HIPS/hypergrad/raw/master/data/mnist/'
 TRAIN_IMAGES = 'train-images-idx3-ubyte.gz'
 TRAIN_LABELS = 'train-labels-idx1-ubyte.gz'
 TEST_IMAGES = 't10k-images-idx3-ubyte.gz'
