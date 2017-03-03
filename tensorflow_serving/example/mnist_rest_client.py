@@ -82,8 +82,12 @@ def _create_rpc_callback(result):
   return _callback
 
 def do_inference(hostport, image):
-  _image = ((255 - np.asarray(image.resize((28, 28)), dtype=np.uint8))
-            / 255.0).reshape(1, 784).astype(np.float32)
+  try:
+    _image = ((255 - np.asarray(image.resize((28, 28)), dtype=np.uint8))
+              / 255.0).reshape(1, 784).astype(np.float32)
+  except:
+    abort(400)
+
   host, port = hostport.split(':')
   channel = implementations.insecure_channel(host, int(port))
   stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
