@@ -68,7 +68,8 @@ RUN mkdir /bazel && \
     rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
 
 # Install dependencies
-RUN pip install flask
+RUN pip install flask && \
+    pip install pillow
 
 COPY . /serving
 

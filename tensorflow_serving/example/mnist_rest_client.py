@@ -27,10 +27,13 @@ Typical usage example:
 
 from __future__ import print_function
 
+import numpy as np
 import sys
 import threading
 
-from flask import Flask, jsonify
+from flask import abort, Flask, request, jsonify
+from PIL import Image
+
 app = Flask(__name__)
 
 # This is a placeholder for a Google-internal import.
@@ -43,126 +46,66 @@ from tensorflow_serving.apis import predict_pb2
 from tensorflow_serving.apis import prediction_service_pb2
 from tensorflow_serving.example import mnist_input_data
 
-concurrency = 1
-num_tests = 1000
 server = 'localhost:9000'
-work_dir = '/tmp'
 
-
-class _ResultCounter(object):
-  """Counter for the prediction results."""
-
-  def __init__(self, num_tests, concurrency):
-    self._num_tests = num_tests
-    self._concurrency = concurrency
-    self._error = 0
-    self._done = 0
-    self._active = 0
+class _Result(object):
+  def __init__(self):
+    self._prediction = None
+    self._scores = None
     self._condition = threading.Condition()
-
-  def inc_error(self):
+  @property
+  def prediction(self): return self_prediction
+  @property
+  def scores(self): return self._scores
+  @prediction.setter
+  def prediction(self, value):
     with self._condition:
-      self._error += 1
-
-  def inc_done(self):
-    with self._condition:
-      self._done += 1
+      self._prediction = value
       self._condition.notify()
-
-  def dec_active(self):
+  @scores.setter
+  def scores(self, value):
     with self._condition:
-      self._active -= 1
+      self._scores = value
       self._condition.notify()
-
-  def get_error_rate(self):
+  def get(self):
     with self._condition:
-      while self._done != self._num_tests:
+      while self._prediction is None or self._scores is None:
         self._condition.wait()
-      return self._error / float(self._num_tests)
+      return {'prediction': self._prediction,
+              'scores': self._scores.tolist()}
 
-  def throttle(self):
-    with self._condition:
-      while self._active == self._concurrency:
-        self._condition.wait()
-      self._active += 1
-
-
-def _create_rpc_callback(label, result_counter):
-  """Creates RPC callback function.
-
-  Args:
-    label: The correct label for the predicted example.
-    result_counter: Counter for the prediction result.
-  Returns:
-    The callback function.
-  """
+def _create_rpc_callback(result):
   def _callback(result_future):
-    """Callback function.
-
-    Calculates the statistics for the prediction result.
-
-    Args:
-      result_future: Result future of the RPC.
-    """
-    #exception = result_future.exception()
-    if False: # and exception:
-      result_counter.inc_error()
-      print(exception)
-    else:
-      sys.stdout.write('.')
-      sys.stdout.flush()
-      response = numpy.array(
-          result_future.result().outputs['scores'].float_val)
-      prediction = numpy.argmax(response)
-      if label != prediction:
-        result_counter.inc_error()
-    result_counter.inc_done()
-    result_counter.dec_active()
+    result.scores = numpy.array(
+      result_future.result().outputs['scores'].float_val)
+    result.prediction = numpy.argmax(result.scores)
   return _callback
 
-
-def do_inference(hostport, work_dir, concurrency, num_tests):
-  """Tests PredictionService with concurrent requests.
-
-  Args:
-    hostport: Host:port address of the PredictionService.
-    work_dir: The full path of working directory for test data set.
-    concurrency: Maximum number of concurrent requests.
-    num_tests: Number of test images to use.
-
-  Returns:
-    The classification error rate.
-
-  Raises:
-    IOError: An error occurred processing test data set.
-  """
-  test_data_set = mnist_input_data.read_data_sets(work_dir).test
+def do_inference(hostport, image):
+  _image = ((255 - np.asarray(image.resize((28, 28)), dtype=np.uint8))
+            / 255.0).reshape(1, 784).astype(np.float32)
   host, port = hostport.split(':')
   channel = implementations.insecure_channel(host, int(port))
   stub = prediction_service_pb2.beta_create_PredictionService_stub(channel)
-  result_counter = _ResultCounter(num_tests, concurrency)
-  for _ in range(num_tests):
-    request = predict_pb2.PredictRequest()
-    request.model_spec.name = 'mnist'
-    request.model_spec.signature_name = 'predict_images'
-    image, label = test_data_set.next_batch(1)
-    request.inputs['images'].CopyFrom(
-        tf.contrib.util.make_tensor_proto(image[0], shape=[1, image[0].size]))
-    result_counter.throttle()
-    result_future = stub.Predict.future(request, 5.0)  # 5 seconds
-    result_future.add_done_callback(
-        _create_rpc_callback(label[0], result_counter))
-  return result_counter.get_error_rate()
+  request = predict_pb2.PredictRequest()
+  request.model_spec.name = 'mnist'
+  request.model_spec.signature_name = 'predict_images'
+  request.inputs['images'].CopyFrom(
+    tf.contrib.util.make_tensor_proto(_image, shape=[1, 784]))
+  result = _Result()
+  result_future = stub.Predict.future(request, 5.0)  # 5 seconds
+  result_future.add_done_callback(_create_rpc_callback(result))
+  return result.get()
 
-@app.route("/")
+@app.route("/", methods=["POST"])
 def hello():
-  error_rate = do_inference(server, work_dir,
-                            concurrency, num_tests)
-  return jsonify(results={
-    "error_rate": error_rate,
-    "data_url": "https://github.com/HIPS/hypergrad/blob/master/data/mnist"
-  })
+  try:
+    image = Image.open(request.files['file'])
+  except:
+    abort(400)
 
+  result = do_inference(server, image)
+  return jsonify(results=result)
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=8000)
